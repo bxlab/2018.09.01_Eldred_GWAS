@@ -1,0 +1,9 @@
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - freebayes ==1.2.0
+  - bcftools ==1.9
+  - parallel ==20180522
+  - perl >=5.26.2

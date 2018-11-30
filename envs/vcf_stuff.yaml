@@ -1,0 +1,10 @@
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - bcftools
+  - vcftools
+  - vcflib
+  - vt
+  - snpsift

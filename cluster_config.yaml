@@ -1,0 +1,8 @@
+__default__:
+    time: "1:00:00"
+    partition: shared
+linear:
+    time: "8:00:00"
+freebayes:
+    partition: lrgmem
+    time: "8:00:00"
