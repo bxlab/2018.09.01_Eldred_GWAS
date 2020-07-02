@@ -1,4 +1,3 @@
-Homo_sapiens_assembly38.dbsnp138.vcf*
 All_20180418.vcf.gz*
 coneratios.pheno
 sw/ldak
@@ -10,12 +9,6 @@ stats
 qc
 mapped
 markdup
-recal
-gatk_called
-gatk_called_combined
-gatk_genotyped
-gatk_filtered
-gatk_annotated
 freebayes
 freebayes*_annotated
 plink

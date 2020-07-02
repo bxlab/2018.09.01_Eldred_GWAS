@@ -22,7 +22,6 @@ print( "Sample base names:", SAMPLES[:10], "..." )
 REGIONS = [ line.strip().split()[:3] for line in open("regions.bed") ]
 REGIONS_CONCAT = [ ( r[0] + ":" + r[1] + "-" + r[2] ) for r in REGIONS ]
 print( "Regions:", REGIONS_CONCAT )
-DATASETS = [ "gatk", "freebayes" ]
 
 singularity: "docker://continuumio/miniconda3:4.4.10"
 
@@ -66,16 +65,6 @@ rule bwa_index:
         algorithm="bwtsw"
     wrapper:
         "0.27.1/bio/bwa/index"
-
-rule create_gatk_dict:
-    input:
-        "genome/{genome}.fa"
-    output:
-        "genome/{genome}.dict"
-    log:
-        "logs/picard/{genome}.dict.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/picard/createsequencedictionary"
 
 rule create_fasta_index:
     input:
@@ -199,16 +188,6 @@ rule multiqc:
 
 # ---- dbSNP ----
 
-rule get_feature_file:
-    output:
-        "Homo_sapiens_assembly38.dbsnp138.vcf"
-    log:
-        "logs/download_feature_file.log"
-    conda:
-        "envs/gsutil.yaml"
-    shell:
-        "gsutil cp gs://genomics-public-data/resources/broad/hg38/v0/{output} ."
-
 rule get_variation_set:
     output:
         "All_20180418.vcf.gz"
@@ -219,171 +198,6 @@ rule get_variation_set:
         wget https://ftp.ncbi.nih.gov/snp/organisms/human_9606/VCF/{output}; \
         wget https://ftp.ncbi.nih.gov/snp/organisms/human_9606/VCF/{output}.tbi
         """
-
-rule create_dbsnp_feature_index:
-    input:
-        "Homo_sapiens_assembly38.dbsnp138.vcf"
-    output:
-        "Homo_sapiens_assembly38.dbsnp138.vcf.idx"
-    log:
-        "logs/gatk/index_feature_file.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/gatk/indexfeaturefile"
-
-
-# ---- GATK ----
-
-rule gatk_bqsr:
-    input:
-        bam="markdup/{sample}.bam",
-        ref="genome/hg38.fa",
-        known="Homo_sapiens_assembly38.dbsnp138.vcf",
-        refdict="genome/hg38.fa.fai",
-        knownidx="Homo_sapiens_assembly38.dbsnp138.vcf.idx"
-    output:
-        bam="recal/{sample}.bam"
-    log:
-        "logs/gatk/bqsr/{sample}.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/gatk/baserecalibrator"
-
-rule gatk_call_variants:
-    input:
-        bam="recal/{sample}.bam",
-        ref="genome/hg38.fa",
-        known="Homo_sapiens_assembly38.dbsnp138.vcf"
-    output:
-        gvcf="gatk_called/{sample}.{region}.g.vcf.gz"
-        #gvcf=temp("gatk_called/{sample}.{region}.g.vcf.gz")
-    params:
-        extra=lambda wildcards: f"--intervals {wildcards.region} --ploidy {'1' if 'chrX' in wildcards.region else '2'}"
-    log:
-        "logs/gatk/haplotypecaller/{sample}.{region}.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/gatk/haplotypecaller"
-
-rule gatk_combine_calls:
-    input:
-        ref="genome/hg38.fa",
-        gvcfs=expand("gatk_called/{sample}.{{region}}.g.vcf.gz", sample=SAMPLES),
-        index=expand("gatk_called/{sample}.{{region}}.g.vcf.gz.tbi", sample=SAMPLES)
-    output:
-        gvcf="gatk_called_combined/all.{region}.g.vcf.gz"
-    log:
-        "logs/gatk/combinegvcfs.{region}.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/gatk/combinegvcfs"
-
-rule create_feature_index:
-    input:
-        "{folder}/{feature}.vcf.gz"
-    output:
-        "{folder}/{feature}.vcf.gz.tbi"
-    log:
-        "logs/gatk/{folder}_index_{feature}.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/gatk/indexfeaturefile"
-
-rule gatk_genotype_variants:
-    input:
-        ref="genome/hg38.fa",
-        gvcf="gatk_called_combined/all.{region}.g.vcf.gz",
-        index="gatk_called_combined/all.{region}.g.vcf.gz.tbi"
-    output:
-        vcf="gatk_genotyped/all.{region}.vcf.gz"
-    params:
-        extra=lambda wildcards: f"--use-new-qual-calculator --intervals {wildcards.region} {'--ploidy 1' if 'chrX' in wildcards.region else '--ploidy 2'}"
-    log:
-        "logs/gatk/genotypegvcfs.{region}.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/gatk/genotypegvcfs"
-
-
-rule gatk_merge_variants:
-    input:
-        vcfs=expand("gatk_genotyped/all.{region}.vcf.gz", region=REGIONS_CONCAT),
-        index=expand("gatk_genotyped/all.{region}.vcf.gz.tbi", region=REGIONS_CONCAT)
-    output:
-        vcf="gatk_genotyped/all.vcf.gz"
-    log:
-        "logs/gatk/picard-merge-genotyped.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/picard/mergevcfs"
-
-# # hard filtering as outlined in GATK docs
-# # (https://gatkforums.broadinstitute.org/gatk/discussion/2806/howto-apply-hard-filters-to-a-call-set)
-# snvs:
-#   "QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
-# indels:
-#   "QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"
-
-def get_vartype_arg(wildcards):
-    return "--select-type-to-include {}".format(
-        "SNP" if wildcards.vartype == "snvs" else "INDEL")
-
-rule gatk_select_calls:
-    input:
-        ref="genome/hg38.fa",
-        vcf="gatk_genotyped/all.vcf.gz"
-    output:
-        vcf="gatk_filtered/all.{vartype,\w+}.vcf.gz"
-        #vcf=temp("gatk_filtered/all.{vartype,\w+}.vcf.gz")
-    params:
-        extra=get_vartype_arg
-    log:
-        "logs/gatk/selectvariants/{vartype}.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/gatk/selectvariants"
-
-def get_gatk_filter(wildcards):
-    if wildcards.vartype == "snvs":
-        return { "snv-hard-filter": "QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0" }
-    elif wildcards.vartype == "indels":
-        return { "snv-hard-filter": "QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0" }
-    else:
-        assert False, "Unknown variant type: " + wildcards.vartype
-
-rule gatk_hard_filter_calls:
-    input:
-        ref="genome/hg38.fa",
-        vcf="gatk_filtered/all.{vartype}.vcf.gz"
-    output:
-        vcf="gatk_filtered/all.{vartype}.hardfiltered.vcf.gz"
-        #vcf=temp("gatk_filtered/all.{vartype}.hardfiltered.vcf.gz")
-    params:
-        filters=get_gatk_filter
-    log:
-        "logs/gatk/variantfiltration/{vartype}.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/gatk/variantfiltration"
-
-rule gatk_merge_calls:
-    input:
-        vcfs=expand("gatk_filtered/all.{vartype}.{filtertype}.vcf.gz",
-                    vartype=["snvs", "indels"],
-                    filtertype="hardfiltered"),
-        indices=expand("gatk_filtered/all.{vartype}.{filtertype}.vcf.gz.tbi",
-                       vartype=["snvs", "indels"],
-                       filtertype="hardfiltered"),
-    output:
-        vcf="gatk_filtered/all.vcf.gz"
-    log:
-        "logs/picard/merge-filtered.log"
-    wrapper:
-        "https://raw.githubusercontent.com/bxlab/snakemake-wrappers/0.60.1b/bio/picard/mergevcfs"
-
-rule gatk_add_ids:
-    input: 
-        vcf="gatk_filtered/all.vcf.gz",
-        dbsnp="All_20180418.vcf.gz"
-    output:
-        "gatk_annotated/all.vcf.gz"
-    log:
-        "logs/add_ids.log"
-    conda:
-        "envs/vcf_stuff.yaml"
-    shell:
-        '''SnpSift annotate -a {input.dbsnp} {input.vcf} | bcftools annotate --set-id +"%CHROM:%POS:%REF:%ALT" | bgzip > {output}'''
 
 
 # ---- FreeBayes ----
@@ -536,69 +350,6 @@ rule plink_ped_to_bim:
         "envs/plink.yaml"
     shell:
         "plink --file plink/{params.base} --make-bed --out plink/{params.base}"
-
-rule plink_pca:
-    input:
-        "plink/{dataset}.bed"
-    output:
-        "plink/{dataset}.eigenval", "plink/{dataset}.eigenvec"
-    log:
-        "logs/plink/{dataset}.pca.log"
-    params:
-        base="{dataset}"
-    conda:
-        "envs/plink.yaml"
-    shell:
-        "plink --bfile plink/{params.base} --pca --out plink/{params.base}"
-
-rule plink_cluster:
-    input:
-        "plink/{dataset}.bed"
-    output:
-        "plink/{dataset}.mds"
-    log:
-        "logs/plink/{dataset}.mds.log"
-    params:
-        base="{dataset}"
-    conda:
-        "envs/plink.yaml"
-    shell:
-        "plink --bfile plink/{params.base} --allow-extra-chr --cluster --mds-plot 3 --out plink/{params.base}"
-
-rule plink_assoc:
-    input:
-        "plink/{dataset}.bed",
-        ph="{pheno}.pheno"
-    output:
-        "plink/{dataset}_{pheno}.qassoc"
-    log:
-        "logs/plink/{dataset}_{pheno}.qassoc.log"
-    params:
-        base="{dataset}", pheno="{pheno}"
-    conda:
-        "envs/plink.yaml"
-    shell:
-        "plink --bfile plink/{params.base} --allow-extra-chr --maf 0.01 --pheno {input.ph} --assoc --allow-no-sex --out plink/{params.base}_{params.pheno}"
-
-rule plink_linear:
-    input:
-        "plink/{dataset}.bed",
-        ph="{pheno}.pheno",
-        eigenvec="plink/{dataset}.eigenvec"
-    output:
-        #"plink/{dataset}_{pheno}_eigen.assoc.linear"
-        "plink/{dataset}_{pheno}.assoc.linear"
-    log:
-        "logs/plink/{dataset}_{pheno}.qassoc.log"
-    params:
-        base="{dataset}", pheno="{pheno}"
-    threads:
-        24
-    conda:
-        "envs/plink.yaml"
-    shell:
-        #"plink --bfile plink/{params.base} --allow-extra-chr --maf 0.05 --geno 0.1 --pheno {input.ph} --threads {threads} --linear mperm=1000 --covar {input.eigenvec} --out plink/{params.base}_{params.pheno}_eigen"
-        "plink --bfile plink/{params.base} --allow-extra-chr --maf 0.05 --geno 0.1 --pheno {input.ph} --threads {threads} --linear mperm=1000 --out plink/{params.base}_{params.pheno}"
 
 rule extract_pheno:
     input:
@@ -753,6 +504,3 @@ rule ethnicity_plot:
         "envs/matplotlib.yaml"
     shell:
         "sw/plot_ethnic_genotypes {input.pheno} {input.ethnicity} {input.region} {input.vcf} {input.snps} {output}"
-
-
-
