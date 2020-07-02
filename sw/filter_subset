@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+
+import sys
+import gzip
+
+def main():
+    pheno_fname, vcf_fname, target = sys.argv[1:4]
+    target_samples = load_phenos(pheno_fname, target)
+    read_vcf(vcf_fname, target_samples)
+
+def load_phenos(fname, target):
+    samples = []
+    for line in open(fname):
+        fields = line.rstrip().split(',')
+        if fields[1] == target:
+            samples.append(fields[0])
+    return set(samples)
+
+def read_vcf(fname, targets):
+    fs = gzip.open(fname, 'rb')
+    indices = list(range(9))
+    for line in fs:
+        line = line.decode('utf8')
+        if line.startswith("##"):
+            print(line, end="")
+            continue
+        fields = line.rstrip().split()
+        if line.startswith("#"):
+            for i in range(9, len(fields)):
+                if fields[i] in targets:
+                    indices.append(i)
+        print('\t'.join([fields[x] for x in indices]))
+    fs.close()
+
+if __name__ == "__main__":
+    main()

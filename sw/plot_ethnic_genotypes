@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+
+import sys
+import gzip
+
+import numpy
+import matplotlib.pyplot as plt
+
+
+def RGB2Hex(rgb):
+    r, g, b = rgb
+    hexval = "#%s%s%s" % (hex(r)[2:].upper().rjust(2, '0'),
+                          hex(g)[2:].upper().rjust(2, '0'),
+                          hex(b)[2:].upper().rjust(2, '0'))
+    return hexval
+
+colors = [
+    RGB2Hex((37, 84, 132)),
+    RGB2Hex((207, 96, 29)),
+    RGB2Hex((43, 118, 38))]
+
+def main():
+    pheno_fname, ethnicity_fname, region_fname, in_fname, snp_fname, out_fname = sys.argv[1:7]
+    snps = load_snps(snp_fname)
+    phenos = load_phenos(pheno_fname)
+    ethnicity, ethnic_dict = load_ethnicity(ethnicity_fname)
+    regions = load_regions(region_fname)
+    data, geno, region, names = load_data(in_fname, phenos, ethnic_dict, regions, snps)
+    N = 0
+    for i in numpy.unique(data['ethnicity']):
+        N += numpy.unique(data['genotype'][numpy.where(data['ethnicity'] == i)]).shape[0]
+    fig, ax = plt.subplots(len(geno), 1, sharey=True, figsize=(3 + N*1.5, 5))
+    for i in range(len(geno)):
+        if len(geno) == 1:
+            plot_data(i, ax, data, ethnicity, geno[i], region[i], names[i])
+        else:
+            plot_data(i, ax, data, ethnicity, geno[i], region[i], names[i])
+    plt.savefig(out_fname)
+
+def load_snps(fname):
+    snps = []
+    for line in open(fname):
+        line = line.rstrip().split()
+        snps.append(line[2])
+    return snps
+
+def load_phenos(fname):
+    phenos = {}
+    for line in open(fname):
+        line = line.rstrip().split()
+        phenos[line[0]] = float(line[2])
+    return phenos
+
+def load_ethnicity(fname):
+    ethnicity = []
+    ethnic_dict = {}
+    for line in open(fname):
+        fields = line.rstrip().split(',')
+        if fields[1] not in ethnicity:
+            eth_id = len(ethnicity)
+            ethnicity.append(fields[1])
+        else:
+            eth_id = ethnicity.index(fields[1])
+        ethnic_dict[fields[0]] = eth_id
+    return ethnicity, ethnic_dict
+
+def load_regions(fname):
+    regions = []
+    for line in open(fname):
+        line = line.rstrip().split('\t')
+        regions.append((line[0], int(line[1]), int(line[2]), line[3]))
+    return regions
+
+def load_data(fname, pheno_dict, ethnic_dict, regions, snps):
+    snp_set = set(snps)
+    geno_dict = {b'0/0': 0, b'0/1': 1, b'1/1': 2, b'0': 3, b'1': 4}
+    geno = []
+    region = []
+    names = []
+    M = 0
+    for line in gzip.open(fname, 'rb'):
+        if line[:2] == b'##':
+            continue
+        elif line[:2] == b'#C':
+            line = line.rstrip(b'\n\r').split()
+            N = len(line) - 9
+            data = numpy.zeros(N, dtype=numpy.dtype([('pheno', numpy.float32),
+                                                     ('ethnicity', numpy.int32),
+                                                     ('genotype', numpy.int32, (len(snps),))]))
+            for i in range(N):
+                name = line[i + 9].decode('utf8')
+                data['pheno'][i] = pheno_dict[name]
+                data['ethnicity'][i] = ethnic_dict[name]
+            continue
+        line = line.replace(b'|', b'/').rstrip(b'\n\r').split()
+        if line[2].decode('utf8') not in snp_set:
+            continue
+        chrom = line[0].decode('utf8')
+        pos = int(line[1])
+        snp = line[2].decode('utf8')
+        a0 = line[3].decode('utf8')
+        a1 = line[4].decode('utf8')        
+        start = 0
+        while a0[start] == a1[start]:
+            start += 1
+        end0 = len(a0) - 1
+        end1 = len(a1) - 1
+        while end0 > start and end1 > start and a0[end0] == a1[end1]:
+            end0 -= 1
+            end1 -= 1
+        a0 = a0[start:(end0 + 1)]
+        a1 = a1[start:(end1 + 1)]
+        if not snp.startswith('rs'):
+            snp = ':'.join([chrom, '%i' % pos, a0, a1])
+        geno.append((a0, a1))
+        names.append(snp)
+        for i, item in enumerate(line[9:]):
+            data['genotype'][i, M] = geno_dict[item.split(b':')[0]]
+        for r in regions:
+            if r[0] == chrom and r[1] <= pos and r[2] > pos:
+                region.append(r[3])
+                break
+        M += 1
+        break
+    return data, geno, region, names
+
+def adjacent_values(vals, q1, q3):
+    upper_adjacent_value = q3 + (q3 - q1) * 1.5
+    upper_adjacent_value = numpy.clip(upper_adjacent_value, q3, vals[-1])
+
+    lower_adjacent_value = q1 - (q3 - q1) * 1.5
+    lower_adjacent_value = numpy.clip(lower_adjacent_value, vals[0], q1)
+    return lower_adjacent_value, upper_adjacent_value
+
+def plot_data(index, ax, data, eth, geno, region, name):
+    ax.set_ylabel("L:M Cone Ratio", size='x-large')
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0 + box.height * 0.22, box.width, box.height * 0.76])
+    ax.annotate("Genotype", (0.5, -0.19), size='x-large', xycoords='axes fraction', ha='center', va='top')
+    X = []
+    Y = []
+    #genotypes = {0: "%s/%s" % (geno[0], geno[0]), 1: "%s/%s" % (geno[0], geno[1]),
+    #             2: "%s/%s" % (geno[1], geno[1]), 3: "%s/-" % (geno[0]), 4: "%s/-" % (geno[1])}
+    genotypes = {0: "0/0", 1: "0/1", 2: "1/1", 3: "0/-", 4: "1/-"}
+    for i in numpy.unique(data['ethnicity']):
+        for j in numpy.unique(data['genotype'][numpy.where(data['ethnicity'] == i)[0], index]):
+            X.append((eth[i], genotypes[j]))
+            Y.append(data['pheno'][numpy.where((data['ethnicity'] == i)
+                                               & (data['genotype'][:, index] == j))])
+            Y[-1].sort()
+    parts = ax.violinplot(Y, showmeans=False, showmedians=False, showextrema=False)
+    for i, pc in enumerate(parts['bodies']):
+        pc.set_edgecolor('black')
+        pc.set_facecolor(colors[i % 3])
+        pc.set_alpha(.9)
+    quartile1 = []
+    medians = []
+    quartile3 = []
+    for i in range(len(Y)):
+        temp = numpy.percentile(Y[i], [25, 50, 75])
+        quartile1.append(temp[0])
+        medians.append(temp[1])
+        quartile3.append(temp[2])
+    whiskers = numpy.array([
+        adjacent_values(sorted_array, q1, q3)
+        for sorted_array, q1, q3 in zip(Y, quartile1, quartile3)])
+    whiskersMin, whiskersMax = whiskers[:, 0], whiskers[:, 1]
+
+    inds = numpy.arange(1, len(medians) + 1)
+    ax.scatter(inds, medians, marker='o', color='white', s=10, zorder=3)
+    ax.vlines(inds, quartile1, quartile3, color='k', linestyle='-', lw=5)
+    ax.vlines(inds, whiskersMin, whiskersMax, color='k', linestyle='-', lw=1)
+    ax.annotate(region, (0.5, 1.2), size='xx-large', xycoords='axes fraction', ha='center', va='top')
+    ax.annotate(name, (0.5, 1.10), size='xx-large', xycoords='axes fraction', ha='center', va='top')
+    ax.get_xaxis().set_tick_params(direction='out')
+    ax.xaxis.set_ticks_position('bottom')
+    ax.set_xticks(inds)
+    ax.set_xticklabels([x[0] for x in X])
+    ax.set_xlim(0.5, len(Y) + 0.5)
+    for i in range(len(X)):
+        #ax.annotate(X[i][0], ((0.5 + i) / len(X), -0.07), size='large', xycoords='axes fraction',
+        #            ha='center', va='top')
+        ax.annotate(X[i][1], ((0.5 + i) / len(X), -0.11), xycoords='axes fraction',
+                    ha='center', va='top')
+        ax.annotate("%i" % len(Y[i]), ((0.5 + i) / len(X), 0.98), xycoords='axes fraction',
+                    ha='center', va='top')
+    ax.grid(True, which='major', axis='y')
+
+if __name__ == "__main__":
+    main()

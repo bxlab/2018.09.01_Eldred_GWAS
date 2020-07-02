@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+
+import sys
+import gzip
+
+import numpy
+import matplotlib.pyplot as plt
+
+
+def RGB2Hex(rgb):
+    r, g, b = rgb
+    hexval = "#%s%s%s" % (hex(r)[2:].upper().rjust(2, '0'),
+                          hex(g)[2:].upper().rjust(2, '0'),
+                          hex(b)[2:].upper().rjust(2, '0'))
+    return hexval
+
+colors = [
+    RGB2Hex((37, 84, 132)),
+    RGB2Hex((207, 96, 29)),
+    RGB2Hex((43, 118, 38))]
+
+def main():
+    pheno_fname, region_fname, in_fname, snp_fname, out_fname = sys.argv[1:6]
+    snps = load_snps(snp_fname)
+    phenos = load_phenos(pheno_fname)
+    regions = load_regions(region_fname)
+    data = load_data(in_fname, phenos, regions, snps)
+    fig, ax = plt.subplots(1, len(data), sharey=True, figsize=(3 + len(data) * 3, 5))
+    for i in range(len(data)):
+        if len(data) == 1:
+            plot_data(i, ax, data[i])
+        else:
+            plot_data(i, ax[i], data[i])
+        write_geno_IDs(data[i])
+    plt.savefig(out_fname)
+
+def load_snps(fname):
+    snps = []
+    for line in open(fname):
+        line = line.rstrip().split()
+        snps.append(line[2].encode('utf8'))
+    return snps
+
+def load_phenos(fname):
+    phenos = {}
+    for line in open(fname):
+        line = line.rstrip().split()
+        phenos[line[0].encode('utf8')] = float(line[2])
+    return phenos
+
+def load_regions(fname):
+    regions = []
+    for line in open(fname):
+        line = line.rstrip().split('\t')
+        regions.append((line[0], int(line[1]), int(line[2]), line[3]))
+    return regions
+
+def load_data(fname, pheno_dict, regions, snps):
+    snp_set = set(snps)
+    data = []
+    IDs = []
+    for line in gzip.open(fname, 'rb'):
+        if line[:2] == b'##':
+            continue
+        elif line[:2] == b'#C':
+            phenos = []
+            line = line.rstrip(b'\n\r').split()
+            for name in line[9:]:
+                phenos.append(pheno_dict[name])
+                IDs.append(name)
+            phenos = numpy.array(phenos, dtype=numpy.float32)
+            continue
+        line = line.replace(b'|', b'/').rstrip(b'\n\r').split()
+        if line[2] not in snp_set:
+            continue
+        chrom = line[0].decode('utf8')
+        pos = int(line[1])
+        snp = line[2].decode('utf8')
+        a0 = line[3].decode('utf8')
+        a1 = line[4].decode('utf8')        
+        start = 0
+        while a0[start] == a1[start]:
+            start += 1
+        end0 = len(a0) - 1
+        end1 = len(a1) - 1
+        while end0 > start and end1 > start and a0[end0] == a1[end1]:
+            end0 -= 1
+            end1 -= 1
+        a0 = a0[start:(end0 + 1)]
+        a1 = a1[start:(end1 + 1)]
+        if not snp.startswith('rs'):
+            snp = ':'.join([chrom, '%i' % pos, a0, a1])
+        geno = {b'0/0': [], b'0/1': [], b'1/1': [], b'0': [], b'1': []}
+        geno_ID = {b'0/0': [], b'0/1': [], b'1/1': [], b'0': [], b'1': []}
+        for i, item in enumerate(line[9:]):
+            key = item.split(b':')[0]
+            if key in geno:
+                geno[key].append(phenos[i])
+                geno_ID[key].append(IDs[i])
+        for key in [b'0/0', b'0/1', b'1/1', b'0', b'1']:
+            if len(geno[key]) == 0:
+                del geno[key]
+                del geno_ID[key]
+            else:
+                geno[key] = numpy.array(geno[key])
+        for r in regions:
+            if r[0] == chrom and r[1] <= pos and r[2] > pos:
+                region = r[3]
+                break
+        data.append((snp, (a0, a1), region, geno, geno_ID))
+    return data
+
+def adjacent_values(vals, q1, q3):
+    upper_adjacent_value = q3 + (q3 - q1) * 1.5
+    upper_adjacent_value = numpy.clip(upper_adjacent_value, q3, vals[-1])
+
+    lower_adjacent_value = q1 - (q3 - q1) * 1.5
+    lower_adjacent_value = numpy.clip(lower_adjacent_value, vals[0], q1)
+    return lower_adjacent_value, upper_adjacent_value
+
+def plot_data(index, ax, data):
+    if index == 0:
+        ax.set_ylabel("L:M Cone Ratio", size='xx-large')
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0 + box.height * 0.22, box.width, box.height * 0.76])
+    ax.annotate("Genotype", (0.5, -0.2), size='xx-large', xycoords='axes fraction', ha='center', va='bottom')
+    X = []
+    Y = []
+    for a in [(b'0', b'0'), (b'0', b'1'), (b'1', b'1'), (b'0',), (b'1',)]:
+        if len(a) == 2:
+            a0, a1 = a
+            key0 = a0 + b'/' + a1
+            key1 = "%s/%s" % (data[1][int(a0.decode('utf8'))], data[1][int(a1.decode('utf8'))])
+        else:
+            key0 = a[0]
+            key1 = "%s/-" % (data[1][int(a[0].decode('utf8'))])
+        if key0 in data[3]:
+            X.append(key1)
+            Y.append(data[3][key0])
+            Y[-1].sort()
+            print(data[0], data[2], key1, len(data[3][key0]))
+    parts = ax.violinplot(Y, showmeans=False, showmedians=False, showextrema=False)
+    for i, pc in enumerate(parts['bodies']):
+        pc.set_edgecolor('black')
+        pc.set_facecolor(colors[i % 3])
+        pc.set_alpha(.9)
+    quartile1 = []
+    medians = []
+    quartile3 = []
+    for i in range(len(Y)):
+        temp = numpy.percentile(Y[i], [25, 50, 75])
+        quartile1.append(temp[0])
+        medians.append(temp[1])
+        quartile3.append(temp[2])
+    whiskers = numpy.array([
+        adjacent_values(sorted_array, q1, q3)
+        for sorted_array, q1, q3 in zip(Y, quartile1, quartile3)])
+    whiskersMin, whiskersMax = whiskers[:, 0], whiskers[:, 1]
+
+    inds = numpy.arange(1, len(medians) + 1)
+    ax.scatter(inds, medians, marker='o', color='white', s=10, zorder=3)
+    ax.vlines(inds, quartile1, quartile3, color='k', linestyle='-', lw=5)
+    ax.vlines(inds, whiskersMin, whiskersMax, color='k', linestyle='-', lw=1)
+    ax.annotate(data[0], (0.5, 1.2), size='x-large', xycoords='axes fraction', ha='center', va='top')
+    ax.annotate(r'%s' % data[2], (0.5, 1.12), size='xx-large', xycoords='axes fraction', ha='center', va='top')
+    ax.get_xaxis().set_tick_params(direction='out')
+    ax.xaxis.set_ticks_position('bottom')
+    ax.set_xticks(inds)
+    ax.set_xticklabels(X, size='x-large')
+    ax.set_xlim(0.5, len(Y) + 0.5)
+
+def write_geno_IDs(data):
+    keys = list(data[4])
+    keys.sort()
+    outfile = open('%s.txt' % data[0], 'w')
+    for key in keys:
+        for ID in data[4][key]:
+            print("%s\t%s" % (ID.decode('utf8'), key.decode('utf8')), file=outfile)
+    outfile.close()
+
+
+if __name__ == "__main__":
+    main()
