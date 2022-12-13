@@ -389,8 +389,24 @@ rule ldak_prune:
         "logs/ldak/{dataset}.prune.log"
     params:
         base="{dataset}"
+    wildcard_constraints:
+        dataset="freebayes|gatk"
     shell:
         "{input.ldak} --bfile plink/{params.base}_recoded --thin ldak/{params.base} --window-prune 0.75 --window-kb 100"
+
+rule ldak_prune_subset:
+    input:
+        "ldak/{dataset}.in"
+    output:
+        "ldak/{dataset}{subset}.in"
+    log:
+        "logs/ldak/{dataset}{subset}.prune.log"
+    params:
+        base="{dataset}"
+    wildcard_constraints:
+        dataset="freebayes|gatk"
+    shell:
+        "cp {input} {output}"
 
 rule ldak_get_kinship:
     input:
@@ -403,6 +419,8 @@ rule ldak_get_kinship:
         "logs/ldak/{dataset}.kinship.log"
     params:
         base="{dataset}"
+    #wildcard_constraints:
+    #    dataset="freebayes|gatk"
     shell:
         "{input.ldak} --bfile plink/{params.base}_recoded --ignore-weights YES --power -1 --extract {input.extract} --calc-kins-direct ldak/{params.base}"
 
@@ -418,6 +436,8 @@ rule ldak_pca:
         "logs/ldak/{dataset}.pca.log"
     params:
         base="{dataset}"
+    #wildcard_constraints:
+    #    dataset="freebayes|gatk"
     shell:
         "{input.ldak} --bfile plink/{params.base}_recoded --pca ldak/{params.base} --axes 5 --grm ldak/{params.base} --extract {input.extract}"
 
@@ -436,6 +456,8 @@ rule ldak_linear:
     params:
         base="{dataset}",
         pheno="{pheno}"
+    #wildcard_constraints:
+    #    dataset="freebayes|gatk"
     shell:
         "{input.ldak} --bfile plink/{params.base}_recoded --linear ldak/{params.base}_{params.pheno} --pheno {input.pheno} --grm ldak/{params.base} --covar {input.pca} --extract {input.extract}"
 
@@ -447,6 +469,79 @@ rule append_ldak_pvalues:
         "ldak/{dataset}_{pheno}.pvalues.annotated"
     log:
         "log/ldak/{dataset}_{pheno}.annotate.log"
+    #wildcard_constraints:
+    #    dataset="freebayes|gatk"
+    shell:
+        """
+        tail -n +2 {input.pvalues} | awk 'BEGIN{{zero="0"; OFS="\t";}} {{print $1,zero}}' | sort -k1,1 > all_snps.txt
+        cat {input.bim}  | grep -F -f all_snps.txt | sort -k2,2 > A
+        tail -n +2 {input.pvalues} | sort -k1,1 | awk '{{print $2}}' > B
+        echo -e "CHR\tSNP\tSEX\tBP\tA1\tA2\tP" > {output}
+        paste A B >> {output}
+        rm A B all_snps.txt
+        """
+
+
+rule ldak_get_kinship_all:
+    input:
+        ldak="sw/ldak",
+        bim="plink/{dataset}_recoded.bim"
+    output:
+        "ldak/{dataset}_all.grm.bin"
+    log:
+        "logs/ldak/{dataset}_all.kinship.log"
+    params:
+        base="{dataset}"
+    wildcard_constraints:
+        dataset="freebayes|gatk"
+    shell:
+        "{input.ldak} --bfile plink/{params.base}_recoded --ignore-weights YES --power -1 --calc-kins-direct ldak/{params.base}_all"
+
+rule ldak_pca_all:
+    input:
+        ldak="sw/ldak",
+        bim="plink/{dataset}_recoded.bim",
+        grm="ldak/{dataset}_all.grm.bin"
+    output:
+        "ldak/{dataset}_all.vect"
+    log:
+        "logs/ldak/{dataset}_all.pca.log"
+    params:
+        base="{dataset}"
+    wildcard_constraints:
+        dataset="freebayes|gatk"
+    shell:
+        "{input.ldak} --bfile plink/{params.base}_recoded --pca ldak/{params.base}_all --axes 5 --grm ldak/{params.base}_all"
+
+rule ldak_linear_all:
+    input:
+        ldak="sw/ldak",
+        bim="plink/{dataset}_recoded.bim",
+        grm="ldak/{dataset}_all.grm.bin",
+        pca="ldak/{dataset}_all.vect",
+        pheno="{pheno}.pheno"
+    output:
+        "ldak/{dataset}_{pheno}_all.pvalues"
+    log:
+        "logs/ldak/{dataset}_{pheno}_all.linear.log"
+    params:
+        base="{dataset}",
+        pheno="{pheno}"
+    wildcard_constraints:
+        dataset="freebayes|gatk"
+    shell:
+        "{input.ldak} --bfile plink/{params.base}_recoded --linear ldak/{params.base}_{params.pheno}_all --pheno {input.pheno} --grm ldak/{params.base}_all --covar {input.pca}_all"
+
+rule append_ldak_pvalues_all:
+    input:
+        bim="plink/{dataset}_recoded.bim",
+        pvalues="ldak/{dataset}_{pheno}_all.pvalues"
+    output:
+        "ldak/{dataset}_{pheno}_all.pvalues.annotated"
+    log:
+        "log/ldak/{dataset}_{pheno}_all.annotate.log"
+    wildcard_constraints:
+        dataset="freebayes|gatk"
     shell:
         """
         tail -n +2 {input.pvalues} | awk 'BEGIN{{zero="0"; OFS="\t";}} {{print $1,zero}}' | sort -k1,1 > all_snps.txt

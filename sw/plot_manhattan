@@ -104,7 +104,8 @@ def plot_data(data, regions, alpha, fname):
     for i, reg in enumerate(regints):
         reg_indices[i + 1] = reg_indices[i] + numpy.sum(data['chr'] == reg)
         widths[i] = data['pos'][reg_indices[i + 1] - 1] - data['pos'][reg_indices[i]]
-    padding = int(0.4 * numpy.sum(widths) / (regints.shape[0] - 1))
+    padding = int(0.4 * numpy.sum(widths) / max(1, regints.shape[0] - 1)):q
+    
     xspan = numpy.sum(widths) + padding * (regints.shape[0] + 3)
     X = numpy.zeros(data.shape[0], dtype=numpy.int32)
     pos = padding * 2
@@ -113,20 +114,22 @@ def plot_data(data, regions, alpha, fname):
         e = reg_indices[i + 1]
         X[s:e] = data['pos'][s:e] - data['pos'][s] + pos
         pos += widths[i] + padding
-    f = plt.figure(figsize=(10,4))
-    ax = f.add_axes((0.1, 0.40, 0.88, 0.58))
-    ax.scatter(X, data['score'], s=20, c=[colors[x % len(colors)] for x in data['chr']],
+    f = plt.figure(figsize=(6,2))
+    ax = f.add_axes((0.055, 0.40, 0.94167, 0.59))
+    ax.scatter(X, data['score'], s=8, c=[colors[x % len(colors)] for x in data['chr']],
                edgecolors='none')
-    ax.set_ylabel(r'- Log$_{10}$(P)', size=16)
+    ax.set_ylabel(r'- Log$_{10}$(P)', size=7)
     cutoff = -numpy.log10(alpha / data.shape[0])
-    ax.hlines([cutoff], 0, xspan, colors='k', alpha=0.5)
+    print("P=%f" % cutoff)
+    ax.hlines([cutoff], 0, xspan, colors='k', alpha=0.25, linewidths=0.5)
     plt.axis('tight')
     plt.xlim(0, xspan)
     yspan = numpy.amax(data['score'])
-    plt.ylim(ymin=(-yspan * 0.1))
-    plt.ylim(ymax=(yspan * 1.1))
+    plt.ylim(ymin=(-yspan * 0.05))
+    plt.ylim(ymax=(yspan * 1.15))
     plt.xticks([(X[reg_indices[i]] + X[reg_indices[i + 1] - 1]) / 2 for i in range(len(regints))],
-               region_names, rotation=40, size=9.5, va='top', ha='right')
+               region_names, rotation=40, size=6, va='top', ha='right', y=0.04, x=0.06)
+    plt.yticks(size=6)
     snps = data['snp'][numpy.where(data['score'] >= cutoff)]
     snp_data = []
     for snp in snps:
@@ -147,7 +150,7 @@ def plot_data(data, regions, alpha, fname):
                     end2 -= 1
                 label = ':'.join([chrom, pos, a1[start:(end1 + 1)], a2[start:(end2 + 1)]])
             ax.annotate(label, (X[index] - xspan * 0.008, data['score'][index] + yspan * 0.008),
-                        xycoords='data', ha='right', va='bottom')
+                        xycoords='data', ha='right', va='bottom', size=6)
     plt.savefig(fname)
     snps = data[snp_data]
     return snps

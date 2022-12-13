@@ -3,8 +3,8 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - bcftools
-  - vcftools
-  - vcflib
+  - bcftools ==1.10.2
+  - vcftools ==0.1.16
+  - vcflib >=1.0.0
   - vt
   - snpsift

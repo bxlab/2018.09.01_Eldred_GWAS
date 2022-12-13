@@ -5,6 +5,7 @@ import gzip
 
 import numpy
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 
 def RGB2Hex(rgb):
@@ -25,14 +26,14 @@ def main():
     phenos = load_phenos(pheno_fname)
     regions = load_regions(region_fname)
     data = load_data(in_fname, phenos, regions, snps)
-    fig, ax = plt.subplots(1, len(data), sharey=True, figsize=(3 + len(data) * 3, 5))
-    for i in range(len(data)):
-        if len(data) == 1:
-            plot_data(i, ax, data[i])
-        else:
-            plot_data(i, ax[i], data[i])
-        write_geno_IDs(data[i])
-    plt.savefig(out_fname)
+    with PdfPages(out_fname) as pdf:
+        for i in range(len(data)):
+            if len(data) == 1:
+                plot_data(data[i])
+            else:
+                plot_data(data[i])
+            pdf.savefig()
+            plt.close()
 
 def load_snps(fname):
     snps = []
@@ -108,6 +109,7 @@ def load_data(fname, pheno_dict, regions, snps):
                 region = r[3]
                 break
         data.append((snp, (a0, a1), region, geno, geno_ID))
+        break
     return data
 
 def adjacent_values(vals, q1, q3):
@@ -118,22 +120,24 @@ def adjacent_values(vals, q1, q3):
     lower_adjacent_value = numpy.clip(lower_adjacent_value, vals[0], q1)
     return lower_adjacent_value, upper_adjacent_value
 
-def plot_data(index, ax, data):
-    if index == 0:
-        ax.set_ylabel("L:M Cone Ratio", size='xx-large')
-    box = ax.get_position()
-    ax.set_position([box.x0, box.y0 + box.height * 0.22, box.width, box.height * 0.76])
-    ax.annotate("Genotype", (0.5, -0.2), size='xx-large', xycoords='axes fraction', ha='center', va='bottom')
+def plot_data(data):
+    f = plt.figure(figsize=(2,2))
+    ax = f.add_axes((0.225, 0.18, 0.765, 0.685))
+    ax.set_ylabel("L:M Cone Ratio", size=7)
+    plt.yticks(size=6)
+    ax.set_xlabel("Genotype", size=7)
     X = []
     Y = []
     for a in [(b'0', b'0'), (b'0', b'1'), (b'1', b'1'), (b'0',), (b'1',)]:
         if len(a) == 2:
             a0, a1 = a
             key0 = a0 + b'/' + a1
-            key1 = "%s/%s" % (data[1][int(a0.decode('utf8'))], data[1][int(a1.decode('utf8'))])
+            key1 = key0.decode('utf8')
+            #key1 = "%s/%s" % (data[1][int(a0.decode('utf8'))], data[1][int(a1.decode('utf8'))])
         else:
             key0 = a[0]
-            key1 = "%s/-" % (data[1][int(a[0].decode('utf8'))])
+            key1 = key0.decode('utf8')
+            #key1 = "%s/-" % (data[1][int(a[0].decode('utf8'))])
         if key0 in data[3]:
             X.append(key1)
             Y.append(data[3][key0])
@@ -158,25 +162,18 @@ def plot_data(index, ax, data):
     whiskersMin, whiskersMax = whiskers[:, 0], whiskers[:, 1]
 
     inds = numpy.arange(1, len(medians) + 1)
-    ax.scatter(inds, medians, marker='o', color='white', s=10, zorder=3)
-    ax.vlines(inds, quartile1, quartile3, color='k', linestyle='-', lw=5)
+    ax.scatter(inds, medians, marker='o', color='white', s=2, zorder=3)
+    ax.vlines(inds, quartile1, quartile3, color='k', linestyle='-', lw=3)
     ax.vlines(inds, whiskersMin, whiskersMax, color='k', linestyle='-', lw=1)
-    ax.annotate(data[0], (0.5, 1.2), size='x-large', xycoords='axes fraction', ha='center', va='top')
-    ax.annotate(r'%s' % data[2], (0.5, 1.12), size='xx-large', xycoords='axes fraction', ha='center', va='top')
+    ax.annotate(data[0], (0.5, 1.177), size=7,
+                xycoords='axes fraction', ha='center', va='top')
+    ax.annotate(data[2], (0.5, 1.088), size=7,
+                xycoords='axes fraction', ha='center', va='top')
     ax.get_xaxis().set_tick_params(direction='out')
     ax.xaxis.set_ticks_position('bottom')
     ax.set_xticks(inds)
-    ax.set_xticklabels(X, size='x-large')
+    ax.set_xticklabels(X, size=6)
     ax.set_xlim(0.5, len(Y) + 0.5)
-
-def write_geno_IDs(data):
-    keys = list(data[4])
-    keys.sort()
-    outfile = open('%s.txt' % data[0], 'w')
-    for key in keys:
-        for ID in data[4][key]:
-            print("%s\t%s" % (ID.decode('utf8'), key.decode('utf8')), file=outfile)
-    outfile.close()
 
 
 if __name__ == "__main__":
